@@ -21,26 +21,32 @@ voice_failures = {}
 OBSLUHA_WHATSAPP = os.environ["OBSLUHA_WHATSAPP"]
 TWILIO_NUMBER = os.environ["TWILIO_NUMBER"]
 ZIVY_CLOVEK = "+420602123030"
-HLAS = "Google.cs-CZ-Wavenet-A"
+HLAS = "Google.cs-CZ-Standard-A"
 JAZYK = "cs-CZ"
 
 def posli_obsluze(zprava):
     twilio_client.messages.create(
-        from_=TWILIO_NUMBER,
+        from_="whatsapp:" + TWILIO_NUMBER.replace("whatsapp:", ""),
         to=OBSLUHA_WHATSAPP,
         body=zprava
     )
 
-def prepoj_na_obsluhu():
+def prepoj_na_obsluhu(duvod=""):
     resp = VoiceResponse()
     resp.say(
         "Prepojuji vas na naseho kolegu. Okamzik prosim.",
         voice=HLAS,
         language=JAZYK
     )
-    dial = Dial()
+    dial = Dial(action="/voice-end", method="POST")
     dial.number(ZIVY_CLOVEK)
     resp.append(dial)
+    return str(resp)
+
+@app.route("/voice-end", methods=["POST"])
+def voice_end():
+    resp = VoiceResponse()
+    resp.say("Dekujeme za zavolani. Na shledanou.", voice=HLAS, language=JAZYK)
     return str(resp)
 
 @app.route("/webhook", methods=["POST"])
@@ -69,11 +75,11 @@ def webhook():
         odpoved = odpoved.split("OBJEDNAVKA_HOTOVA")[0].strip()
     elif "ZAKAZNIK_CHCE_ZAVOLAT" in odpoved:
         cast = odpoved.split("ZAKAZNIK_CHCE_ZAVOLAT")[-1].strip()
-        posli_obsluze("ZAKAZNIK CHCE ZAVOLAT\nTel: " + cislo + "\n\n" + cast + "\n\nZavolej zakaznikovi z cisla 602 123 030")
+        posli_obsluze("ZAKAZNIK CHCE ZAVOLAT\nTel: " + cislo + "\n\n" + cast + "\n\nZavolej z cisla 602 123 030")
         odpoved = odpoved.split("ZAKAZNIK_CHCE_ZAVOLAT")[0].strip()
     elif "SPECIALNI_DOTAZ" in odpoved:
         cast = odpoved.split("SPECIALNI_DOTAZ")[-1].strip()
-        posli_obsluze("SPECIALNI DOTAZ - BOOM PIZZA\nTel: " + cislo + "\n\n" + cast + "\n\nZavolej zakaznikovi z cisla 602 123 030")
+        posli_obsluze("SPECIALNI DOTAZ\nTel: " + cislo + "\n\n" + cast + "\n\nZavolej z cisla 602 123 030")
         odpoved = odpoved.split("SPECIALNI_DOTAZ")[0].strip()
     elif "PODEZRELA_ZPRAVA" in odpoved:
         cast = odpoved.split("PODEZRELA_ZPRAVA")[-1].strip()
@@ -94,8 +100,8 @@ def voice():
         input="speech",
         action="/voice-response",
         language=JAZYK,
-        speech_timeout="auto",
-        timeout=5
+        speech_timeout=3,
+        timeout=8
     )
     gather.say(
         "Dobry den, vitejte v BOOM PIZZA. Co si prejete objednat?",
@@ -103,7 +109,6 @@ def voice():
         language=JAZYK
     )
     resp.append(gather)
-    resp.say("Nerozumel jsem. Zkusim to znovu.", voice=HLAS, language=JAZYK)
     resp.redirect("/voice")
     return str(resp)
 
@@ -119,8 +124,8 @@ def voice_response():
         if failures >= 2:
             voice_failures[zakaznik] = 0
             posli_obsluze(
-                "PREPOJENY HOVOR\nTel: " + zakaznik + "\n"
-                "Bot nerozumel zakaznikovi, hovor prepojeni na 602 123 030"
+                "PREPOJENY HOVOR - bot nerozumel\n"
+                "Tel: " + zakaznik
             )
             return prepoj_na_obsluhu()
 
@@ -129,8 +134,8 @@ def voice_response():
             input="speech",
             action="/voice-response",
             language=JAZYK,
-            speech_timeout="auto",
-            timeout=5
+            speech_timeout=3,
+            timeout=8
         )
         gather.say(
             "Omlouvam se, nerozumel jsem. Zkuste to prosim znovu.",
@@ -148,8 +153,14 @@ def voice_response():
 
     response = claude.messages.create(
         model="claude-sonnet-4-20250514",
-        max_tokens=500,
-        system=SYSTEM_PROMPT + "\nDavej kratke odpovedi vhodne pro telefonni hovor. Maximalne 2-3 vety.",
+        max_tokens=300,
+        system=SYSTEM_PROMPT + (
+            "\nJsi na telefonu. Pravidla:"
+            "\n- Maximalne 1-2 kratke vety."
+            "\n- Nikdy neopakuj ceny pokud se nezeptaji."
+            "\n- Zeptej se vzdy jen na jednu vec najednou."
+            "\n- Bud strucny a prirodzeny."
+        ),
         messages=history
     )
     odpoved = response.content[0].text
@@ -158,14 +169,14 @@ def voice_response():
 
     if "OBJEDNAVKA_HOTOVA" in odpoved:
         cast = odpoved.split("OBJEDNAVKA_HOTOVA")[-1].strip()
-        posli_obsluze("NOVA OBJEDNAVKA TELEFON - BOOM PIZZA\nTel: " + zakaznik + "\n\n" + cast)
+        posli_obsluze("NOVA OBJEDNAVKA TELEFON\nTel: " + zakaznik + "\n\n" + cast)
         odpoved_text = odpoved.split("OBJEDNAVKA_HOTOVA")[0].strip()
         resp = VoiceResponse()
         resp.say(odpoved_text, voice=HLAS, language=JAZYK)
         return str(resp)
 
     elif "ZAKAZNIK_CHCE_ZAVOLAT" in odpoved:
-        posli_obsluze("ZAKAZNIK CHCE MLUVIT S CLOVEKOM\nTel: " + zakaznik + "\nPrepojuji na 602 123 030")
+        posli_obsluze("ZAKAZNIK CHCE MLUVIT S CLOVEKOM\nTel: " + zakaznik)
         return prepoj_na_obsluhu()
 
     resp = VoiceResponse()
@@ -173,8 +184,8 @@ def voice_response():
         input="speech",
         action="/voice-response",
         language=JAZYK,
-        speech_timeout="auto",
-        timeout=5
+        speech_timeout=3,
+        timeout=8
     )
     gather.say(odpoved, voice=HLAS, language=JAZYK)
     resp.append(gather)
