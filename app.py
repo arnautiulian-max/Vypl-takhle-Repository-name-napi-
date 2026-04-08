@@ -184,8 +184,8 @@ def voice_response():
         input="speech",
         action="/voice-response",
         language=JAZYK,
-        speech_timeout=3,
-        timeout=8
+        speech_timeout=1,
+        timeout=3
     )
     gather.say(odpoved, voice=HLAS, language=JAZYK)
     resp.append(gather)
