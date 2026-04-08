@@ -2,7 +2,7 @@ import os
 from flask import Flask, request
 from twilio.rest import Client
 from twilio.twiml.messaging_response import MessagingResponse
-from twilio.twiml.voice_response import VoiceResponse, Gather
+from twilio.twiml.voice_response import VoiceResponse, Gather, Dial
 import anthropic
 from menu import MENU_TEXT, SYSTEM_PROMPT
 
@@ -16,9 +16,11 @@ claude = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
 
 conversations = {}
 voice_conversations = {}
+voice_failures = {}
 
 OBSLUHA_WHATSAPP = os.environ["OBSLUHA_WHATSAPP"]
 TWILIO_NUMBER = os.environ["TWILIO_NUMBER"]
+ZIVÝ_CLOVEK = "+420602123030"
 
 def posli_obsluze(zprava):
     twilio_client.messages.create(
@@ -27,13 +29,17 @@ def posli_obsluze(zprava):
         body=zprava
     )
 
-def rekni(text):
-    from twilio.twiml.voice_response import Say
-    return Say(
-        text,
+def prepoj_na_obsluhu():
+    resp = VoiceResponse()
+    resp.say(
+        "Prepojuji vas na naseho kolegu. Okamzik prosim.",
         voice="Polly.Jakub",
         language="cs-CZ"
     )
+    dial = Dial()
+    dial.number(ZIVÝ_CLOVEK)
+    resp.append(dial)
+    return str(resp)
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
@@ -95,6 +101,9 @@ def webhook():
 
 @app.route("/voice", methods=["POST"])
 def voice():
+    zakaznik = request.form.get("From", "")
+    voice_failures[zakaznik] = 0
+    
     resp = VoiceResponse()
     gather = Gather(
         input="speech",
@@ -110,26 +119,49 @@ def voice():
     )
     resp.append(gather)
     resp.say(
-        "Nerozumel jsem. Prosim zavolejte znovu.",
+        "Nerozumel jsem. Zkusim to znovu.",
         voice="Polly.Jakub",
         language="cs-CZ"
     )
+    resp.redirect("/voice")
     return str(resp)
 
 @app.route("/voice-response", methods=["POST"])
 def voice_response():
-    zakaznik = request.form.get("From")
+    zakaznik = request.form.get("From", "")
     zprava = request.form.get("SpeechResult", "").strip()
 
     if not zprava:
+        failures = voice_failures.get(zakaznik, 0) + 1
+        voice_failures[zakaznik] = failures
+
+        if failures >= 2:
+            voice_failures[zakaznik] = 0
+            posli_obsluze(
+                "PREPOJENY HOVOR\n"
+                "Tel: " + zakaznik + "\n"
+                "Bot nerozumel zakaznikovi, hovor prepojeni na 602 123 030"
+            )
+            return prepoj_na_obsluhu()
+
         resp = VoiceResponse()
-        resp.say(
-            "Nerozumel jsem. Zkuste to prosim znovu.",
+        gather = Gather(
+            input="speech",
+            action="/voice-response",
+            language="cs-CZ",
+            speech_timeout="auto",
+            timeout=5
+        )
+        gather.say(
+            "Omlouvam se, nerozumel jsem. Zkuste to prosim znovu.",
             voice="Polly.Jakub",
             language="cs-CZ"
         )
-        resp.redirect("/voice")
+        resp.append(gather)
+        resp.redirect("/voice-response")
         return str(resp)
+
+    voice_failures[zakaznik] = 0
 
     history = voice_conversations.get(zakaznik, [])
     history.append({"role": "user", "content": zprava})
@@ -144,36 +176,24 @@ def voice_response():
     history.append({"role": "assistant", "content": odpoved})
     voice_conversations[zakaznik] = history[-20:]
 
-    cislo = zakaznik
-
     if "OBJEDNAVKA_HOTOVA" in odpoved:
         cast = odpoved.split("OBJEDNAVKA_HOTOVA")[-1].strip()
         posli_obsluze(
             "NOVA OBJEDNAVKA TELEFON - BOOM PIZZA\n"
-            "Tel: " + cislo + "\n\n" + cast
+            "Tel: " + zakaznik + "\n\n" + cast
         )
         odpoved_text = odpoved.split("OBJEDNAVKA_HOTOVA")[0].strip()
         resp = VoiceResponse()
-        resp.say(
-            odpoved_text,
-            voice="Polly.Jakub",
-            language="cs-CZ"
-        )
+        resp.say(odpoved_text, voice="Polly.Jakub", language="cs-CZ")
         return str(resp)
 
     elif "ZAKAZNIK_CHCE_ZAVOLAT" in odpoved:
         posli_obsluze(
             "ZAKAZNIK CHCE MLUVIT S CLOVEKOM\n"
-            "Tel: " + cislo + "\n"
-            "Zavolej zakaznikovi z cisla 602 123 030"
+            "Tel: " + zakaznik + "\n"
+            "Prepojuji na 602 123 030"
         )
-        resp = VoiceResponse()
-        resp.say(
-            "Samozrejme. Nas kolega vam zavola co nejdrive. Dekujeme za trpezlivost.",
-            voice="Polly.Jakub",
-            language="cs-CZ"
-        )
-        return str(resp)
+        return prepoj_na_obsluhu()
 
     resp = VoiceResponse()
     gather = Gather(
@@ -183,11 +203,7 @@ def voice_response():
         speech_timeout="auto",
         timeout=5
     )
-    gather.say(
-        odpoved,
-        voice="Polly.Jakub",
-        language="cs-CZ"
-    )
+    gather.say(odpoved, voice="Polly.Jakub", language="cs-CZ")
     resp.append(gather)
     return str(resp)
 
