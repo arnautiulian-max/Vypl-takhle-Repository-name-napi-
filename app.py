@@ -27,6 +27,14 @@ def posli_obsluze(zprava):
         body=zprava
     )
 
+def rekni(text):
+    from twilio.twiml.voice_response import Say
+    return Say(
+        text,
+        voice="Polly.Jakub",
+        language="cs-CZ"
+    )
+
 @app.route("/webhook", methods=["POST"])
 def webhook():
     zakaznik = request.form.get("From")
@@ -96,12 +104,16 @@ def voice():
         timeout=5
     )
     gather.say(
-        "Dobry den, vitejte v BOOM PIZZA. "
-        "Co si prejete objednat?",
+        "Dobry den, vitejte v BOOM PIZZA. Co si prejete objednat?",
+        voice="Polly.Jakub",
         language="cs-CZ"
     )
     resp.append(gather)
-    resp.say("Nerozumel jsem. Prosim zavolejte znovu.", language="cs-CZ")
+    resp.say(
+        "Nerozumel jsem. Prosim zavolejte znovu.",
+        voice="Polly.Jakub",
+        language="cs-CZ"
+    )
     return str(resp)
 
 @app.route("/voice-response", methods=["POST"])
@@ -111,7 +123,11 @@ def voice_response():
 
     if not zprava:
         resp = VoiceResponse()
-        resp.say("Nerozumel jsem. Zkuste to prosim znovu.", language="cs-CZ")
+        resp.say(
+            "Nerozumel jsem. Zkuste to prosim znovu.",
+            voice="Polly.Jakub",
+            language="cs-CZ"
+        )
         resp.redirect("/voice")
         return str(resp)
 
@@ -138,7 +154,11 @@ def voice_response():
         )
         odpoved_text = odpoved.split("OBJEDNAVKA_HOTOVA")[0].strip()
         resp = VoiceResponse()
-        resp.say(odpoved_text, language="cs-CZ")
+        resp.say(
+            odpoved_text,
+            voice="Polly.Jakub",
+            language="cs-CZ"
+        )
         return str(resp)
 
     elif "ZAKAZNIK_CHCE_ZAVOLAT" in odpoved:
@@ -150,6 +170,7 @@ def voice_response():
         resp = VoiceResponse()
         resp.say(
             "Samozrejme. Nas kolega vam zavola co nejdrive. Dekujeme za trpezlivost.",
+            voice="Polly.Jakub",
             language="cs-CZ"
         )
         return str(resp)
@@ -162,7 +183,11 @@ def voice_response():
         speech_timeout="auto",
         timeout=5
     )
-    gather.say(odpoved, language="cs-CZ")
+    gather.say(
+        odpoved,
+        voice="Polly.Jakub",
+        language="cs-CZ"
+    )
     resp.append(gather)
     return str(resp)
 
