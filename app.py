@@ -53,6 +53,16 @@ VOICE_SYSTEM = (
     "Adresa: zopakuj ulici a číslo zvlášť, pak se zeptej na město — například: Takže ulice Máchova, číslo osm — a jste ve Strakonicích?\n"
     "Pokud zákazník řekne ne, požádej ho aby zopakoval pomalu.\n\n"
 
+    "ROZPOZNÁVÁNÍ TELEFONNÍHO ČÍSLA:\n"
+    "České mobilní číslo má VŽDY přesně 9 číslic — například 777 285 855.\n"
+    "Pokud slyšíš méně než 9 číslic, číslo je neúplné — zeptej se: Číslo mi nevyšlo na devět číslic, můžete ho zopakovat pomalu po trojicích?\n"
+    "Příklad správného postupu:\n"
+    "Zákazník říká: sedm sedm sedm dva osm pět osm pět pět\n"
+    "Ty sečteš: 9 číslic = správně → zopakuješ: Takže 777 285 855, je to správně?\n"
+    "Zákazník říká: sedm sedm sedm dva osm pět osm pět\n"
+    "Ty sečteš: 8 číslic = neúplné → ptáš se znovu\n"
+    "NIKDY nepokračuj s neúplným číslem.\n\n"
+
     "ROZPOZNÁVÁNÍ ADRESY:\n"
     "Adresu sbírej vždy po krocích: nejdřív ulice a číslo, pak město nebo PSČ.\n"
     "Vždy zopakuj každou část zvlášť pro potvrzení.\n"
