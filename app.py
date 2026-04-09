@@ -23,7 +23,7 @@ voice_silence = {}
 OBSLUHA_WHATSAPP = os.environ["OBSLUHA_WHATSAPP"]
 TWILIO_NUMBER = os.environ["TWILIO_NUMBER"]
 ZIVY_CLOVEK = "+420602123030"
-HLAS = "Google.cs-CZ-Wavenet-B"
+HLAS = "Google.cs-CZ-Wavenet-A"
 JAZYK = "cs-CZ"
 
 VOICE_SYSTEM = (
@@ -33,9 +33,13 @@ VOICE_SYSTEM = (
     "2. Zadne emoji ani hvezdicky.\n"
     "3. Ptej se vzdy jen na jednu vec.\n"
     "4. Mluv prirozene, VZDY vykej.\n"
-    "5. Bud rychly a efektivni - lide nechteji dlouho cekat.\n"
-    "6. Pokud zakaznik rici jen nazev pizzy bez velikosti, hned se zeptej: 32 nebo 42?\n"
-    "7. Po potvrzeni rekni jen cas a podekuj.\n\n"
+    "5. Bud rychly a efektivni.\n"
+    "6. Cas doruceni: osobni vyzvednuti cca 20 minut, rozvoz cca 30 minut - vzdy rikej ze je to orientacni.\n\n"
+    "CISLA A ADRESY:\n"
+    "Kdyz zakaznik rika telefonni cislo nebo adresu, VZDY to zopakuj zpet pro potvrzeni.\n"
+    "Priklad: Zakaznik rekne 777 123 456, ty reknees: Takze cislo 777 123 456, je to spravne?\n"
+    "Priklad adresy: Zakaznik rekne Machackova 8, ty reknees: Takze adresa Machackova 8, je to spravne?\n"
+    "Pokud zakaznik rekne ne, pozadej ho aby zopakoval cislo nebo adresu pomalu.\n\n"
     "ROZPOZNAVANI PIZZ PO TELEFONU:\n"
     "Speech-to-text muze zkomolid nazvy. Bud tolerantni.\n"
     "sunkova / sunkavu / sunkov / sunkavou = Sunkas\n"
@@ -103,7 +107,7 @@ def po_prepojeni():
         )
         resp = VoiceResponse()
         resp.say(
-            "Kolega je nedostupny. Zavolame Vam zpet. Dekujeme.",
+            "Kolega je nedostupny. Zavolame Vam zpet co nejdrive. Dekujeme.",
             voice=HLAS,
             language=JAZYK
         )
@@ -183,8 +187,8 @@ def voice():
         input="speech",
         action="/voice-response",
         language=JAZYK,
-        speech_timeout="1",
-        timeout=4
+        speech_timeout="2",
+        timeout=5
     )
     gather.say(
         "Dobry den, BOOM PIZZA, co Vam mohu dat?",
@@ -210,11 +214,11 @@ def voice_no_input():
         input="speech",
         action="/voice-response",
         language=JAZYK,
-        speech_timeout="1",
-        timeout=4
+        speech_timeout="2",
+        timeout=5
     )
     gather.say(
-        "Jste tam? Co Vam mohu dat?",
+        "Jste tam? Jak Vam mohu pomoci?",
         voice=HLAS,
         language=JAZYK
     )
@@ -241,11 +245,11 @@ def voice_response():
             input="speech",
             action="/voice-response",
             language=JAZYK,
-            speech_timeout="1",
-            timeout=4
+            speech_timeout="2",
+            timeout=5
         )
         gather.say(
-            "Nerozumel jsem, zkuste znovu.",
+            "Nerozumel jsem, zkuste znovu prosim.",
             voice=HLAS,
             language=JAZYK
         )
@@ -260,13 +264,13 @@ def voice_response():
 
     response = claude.messages.create(
         model="claude-haiku-4-5-20251001",
-        max_tokens=150,
+        max_tokens=200,
         system=VOICE_SYSTEM,
         messages=history
     )
     odpoved = response.content[0].text
     history.append({"role": "assistant", "content": odpoved})
-    voice_conversations[zakaznik] = history[-10:]
+    voice_conversations[zakaznik] = history[-16:]
 
     if "OBJEDNAVKA_HOTOVA" in odpoved:
         cast = odpoved.split("OBJEDNAVKA_HOTOVA")[-1].strip()
@@ -287,8 +291,8 @@ def voice_response():
         input="speech",
         action="/voice-response",
         language=JAZYK,
-        speech_timeout="1",
-        timeout=4
+        speech_timeout="2",
+        timeout=5
     )
     gather.say(odpoved, voice=HLAS, language=JAZYK)
     resp.append(gather)
