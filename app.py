@@ -191,7 +191,10 @@ def voice():
         timeout=5
     )
     gather.say(
-        "Dobry den, BOOM PIZZA, co Vam mohu dat?",
+        "Dobry den, BOOM PIZZA. "
+        "Tento hovor muze byt zaznamenan pro ucely zpracovani objednavky. "
+        "Pokracovanim v hovoru souhlasíte se zpracovanim osobnich udaju. "
+        "Co Vam mohu dat?",
         voice=HLAS,
         language=JAZYK
     )
