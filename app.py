@@ -4,6 +4,7 @@ from twilio.rest import Client
 from twilio.twiml.messaging_response import MessagingResponse
 from twilio.twiml.voice_response import VoiceResponse, Gather, Dial
 import anthropic
+from datetime import datetime
 from menu import MENU_TEXT, SYSTEM_PROMPT
 
 app = Flask(__name__)
@@ -34,6 +35,11 @@ VOICE_SYSTEM = (
     "5. VZDY vykej zakaznikovi.\n"
     "6. Po potvrzeni objednavky rekni jen cas doruceni a podekuj."
 )
+
+def je_otevreno():
+    now = datetime.now()
+    hodina = now.hour
+    return 10 <= hodina < 22
 
 def posli_obsluze(zprava):
     twilio_client.messages.create(
@@ -77,7 +83,7 @@ def po_prepojeni():
         resp = VoiceResponse()
         resp.say(
             "Omlouvame se, kolega je momentalne nedostupny. "
-            "Zavolame Vam co nejdrive zpet. Dekujeme.",
+            "Zavolame Vam co nejdrive zpet. Dekujeme za trpezlivost.",
             voice=HLAS,
             language=JAZYK
         )
@@ -90,6 +96,16 @@ def po_prepojeni():
 def webhook():
     zakaznik = request.form.get("From")
     zprava = request.form.get("Body", "").strip()
+
+    if not je_otevreno():
+        resp = MessagingResponse()
+        resp.message(
+            "Dobry den! Dekujeme za Vasi zpravu. "
+            "Momentalne jsme zavreni. "
+            "Nase provozni doba je Po-Ne 10:00-22:00. "
+            "Rádi Vam pomuzeme s objednavkou zitra od 10:00!"
+        )
+        return str(resp)
 
     history = conversations.get(zakaznik, [])
     history.append({"role": "user", "content": zprava})
@@ -134,6 +150,18 @@ def voice():
     voice_conversations[zakaznik] = []
 
     resp = VoiceResponse()
+
+    if not je_otevreno():
+        resp.say(
+            "Dobry den, dekujeme za Vas hovor. "
+            "Momentalne jsme zavreni. "
+            "Nase provozni doba je pondeli az nedele od deseti do dvaadvaceti hodin. "
+            "Zavolejte nam prosim znovu. Dekujeme.",
+            voice=HLAS,
+            language=JAZYK
+        )
+        return str(resp)
+
     gather = Gather(
         input="speech",
         action="/voice-response",
@@ -142,7 +170,7 @@ def voice():
         timeout=4
     )
     gather.say(
-        "Dobry den, BOOM PIZZA, co si Vam mohu dat?",
+        "Dobry den, BOOM PIZZA, co Vam mohu dat?",
         voice=HLAS,
         language=JAZYK
     )
