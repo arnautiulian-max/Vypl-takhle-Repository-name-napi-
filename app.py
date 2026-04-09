@@ -102,7 +102,15 @@ VOICE_SYSTEM = (
 
     "PŘIDÁVÁNÍ K OBJEDNÁVCE:\n"
     "Pokud zákazník řekne a ještě, přidejte, taky — zeptej se co chce přidat a přidej k objednávce.\n"
-    "Vždy potvrď přidání: Dobře, přidávám [položka]. Něco dalšího?\n"
+    "Vždy potvrď přidání: Dobře, přidávám [položka]. Něco dalšího?\n\n"
+
+    "PAMĚŤ OBJEDNÁVKY BĚHEM HOVORU:\n"
+    "KRITICKY DŮLEŽITÉ: Udržuj si interní seznam všeho co zákazník objednal.\n"
+    "Když zákazník řekne 'dvě Boom Pizza' — zapamatuj si: 2x Boom Pizza.\n"
+    "Když potom řekne 'a ještě jednu Margheritu' — přidej: 1x Margheritas.\n"
+    "Nikdy nezapomínej předchozí položky. Vždy pracuj s celým seznamem.\n"
+    "Před shrnutím si projdi celou historii hovoru a zahrň VŠE co zákazník zmínil.\n"
+    "Pokud si nejsi jistý, radši se zeptej: Takže máme [seznam], je to vše?\n"
 )
 
 
@@ -337,13 +345,13 @@ def voice_response():
 
     response = claude.messages.create(
         model="claude-haiku-4-5-20251001",
-        max_tokens=200,
+        max_tokens=400,
         system=VOICE_SYSTEM,
         messages=history
     )
     odpoved = response.content[0].text
     history.append({"role": "assistant", "content": odpoved})
-    voice_conversations[zakaznik] = history[-16:]
+    voice_conversations[zakaznik] = history[-30:]
 
     if "OBJEDNAVKA_HOTOVA" in odpoved:
         cast = odpoved.split("OBJEDNAVKA_HOTOVA")[-1].strip()
