@@ -18,6 +18,7 @@ claude = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
 conversations = {}
 voice_conversations = {}
 voice_failures = {}
+voice_silence = {}
 
 OBSLUHA_WHATSAPP = os.environ["OBSLUHA_WHATSAPP"]
 TWILIO_NUMBER = os.environ["TWILIO_NUMBER"]
@@ -27,19 +28,42 @@ JAZYK = "cs-CZ"
 
 VOICE_SYSTEM = (
     SYSTEM_PROMPT +
-    "\n\nJsi na telefonu. Pravidla pro telefonni hovor:\n"
-    "1. Odpovídej VELMI kratce - maximálne 1-2 vety.\n"
-    "2. Nepouzivej emoji ani hvezdicky.\n"
-    "3. Ptej se vzdy jen na jednu vec najednou.\n"
-    "4. Mluv prirozene jako clovek na telefonu.\n"
-    "5. VZDY vykej zakaznikovi.\n"
-    "6. Po potvrzeni objednavky rekni jen cas doruceni a podekuj."
+    "\n\nJsi na telefonu. Pravidla:\n"
+    "1. Odpovídej VELMI kratce - max 1-2 vety.\n"
+    "2. Zadne emoji ani hvezdicky.\n"
+    "3. Ptej se vzdy jen na jednu vec.\n"
+    "4. Mluv prirozene, VZDY vykej.\n"
+    "5. Bud rychly a efektivni - lide nechteji dlouho cekat.\n"
+    "6. Pokud zakaznik rici jen nazev pizzy bez velikosti, hned se zeptej: 32 nebo 42?\n"
+    "7. Po potvrzeni rekni jen cas a podekuj.\n\n"
+    "ROZPOZNAVANI PIZZ PO TELEFONU:\n"
+    "Speech-to-text muze zkomolid nazvy. Bud tolerantni.\n"
+    "sunkova / sunkavu / sunkov / sunkavou = Sunkas\n"
+    "salamova / salami / pepperoni / peperoni = Pepperonis\n"
+    "syrova / ctyr syry / ctyri syry / cheesy = Super Cheesys\n"
+    "slaninova / slanina / slaninovu = Slaninos\n"
+    "margarita / margherita / margerita / klasicka = Margheritas\n"
+    "tunakova / tunak / tunac / tuna = Tunas\n"
+    "havajska / hawaii / havaj / ananas = Hawais\n"
+    "chorizo / choriza = Chorizos\n"
+    "jalapeno / jalap / ostra salami = Pepperoni Jalapeno\n"
+    "texaska / texas = Texas\n"
+    "kureci / kure / chicken = Chicken\n"
+    "brusinkova / boruvkova = Brusinkys/Boruvkys\n"
+    "farmarska / farmar / sedlacka = Farmaris\n"
+    "bbq / barbecue / grilova = Barbecues Chicken\n"
+    "mexicka / mexiko = Mexicanos\n"
+    "caprese / kaprese = Caprisos\n"
+    "boom hot / hot / ostra / pikantni = Boom Pizza Hot\n"
+    "boom / specialita = Boom Pizza\n"
+    "vegetarska / bez masa / zeleninova = Vegetarians\n"
+    "pivo / pilsner / urquell = Pilsner Urquell\n"
+    "Pokud si nejsi jisty, zeptej se: Myslite pizzu [nazev]?\n"
 )
 
 def je_otevreno():
     now = datetime.now()
-    hodina = now.hour
-    return 10 <= hodina < 22
+    return 10 <= now.hour < 22
 
 def posli_obsluze(zprava):
     twilio_client.messages.create(
@@ -48,23 +72,21 @@ def posli_obsluze(zprava):
         body=zprava
     )
 
-def prepoj_na_obsluhu(zakaznik=""):
+def prepoj_na_obsluhu(zakaznik="", duvod=""):
     if zakaznik:
         posli_obsluze(
             "PRICHOZI PREPOJENI\n"
             "Tel: " + zakaznik + "\n"
-            "Zakaznik ceka na lince - prijmete hovor!"
+            "Duvod: " + (duvod or "Zakaznik pozadal o spojeni") + "\n"
+            "Zakaznik ceka na lince!"
         )
     resp = VoiceResponse()
     resp.say(
-        "Okamzik prosim, prepojuji Vas na naseho kolegu.",
+        "Prepojuji Vas na kolegu.",
         voice=HLAS,
         language=JAZYK
     )
-    dial = Dial(
-        action="/po-prepojeni",
-        timeout=30
-    )
+    dial = Dial(action="/po-prepojeni", timeout=30)
     dial.number(ZIVY_CLOVEK)
     resp.append(dial)
     return str(resp)
@@ -73,24 +95,20 @@ def prepoj_na_obsluhu(zakaznik=""):
 def po_prepojeni():
     dial_status = request.form.get("DialCallStatus", "")
     zakaznik = request.form.get("From", "")
-
     if dial_status != "completed":
         posli_obsluze(
             "ZMESKANY HOVOR\n"
             "Tel: " + zakaznik + "\n"
-            "Zakaznik se nedovolal - zavolej mu zpet!"
+            "Zakaznik se nedovolal - zavolej zpet!"
         )
         resp = VoiceResponse()
         resp.say(
-            "Omlouvame se, kolega je momentalne nedostupny. "
-            "Zavolame Vam co nejdrive zpet. Dekujeme za trpezlivost.",
+            "Kolega je nedostupny. Zavolame Vam zpet. Dekujeme.",
             voice=HLAS,
             language=JAZYK
         )
         return str(resp)
-
-    resp = VoiceResponse()
-    return str(resp)
+    return str(VoiceResponse())
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
@@ -102,8 +120,8 @@ def webhook():
         resp.message(
             "Dobry den! Dekujeme za Vasi zpravu. "
             "Momentalne jsme zavreni. "
-            "Nase provozni doba je Po-Ne 10:00-22:00. "
-            "Rádi Vam pomuzeme s objednavkou zitra od 10:00!"
+            "Provozni doba: Po-Ne 10:00-22:00. "
+            "Rádi Vam pomuzeme s objednavkou od 10:00!"
         )
         return str(resp)
 
@@ -147,16 +165,15 @@ def webhook():
 def voice():
     zakaznik = request.form.get("From", "")
     voice_failures[zakaznik] = 0
+    voice_silence[zakaznik] = 0
     voice_conversations[zakaznik] = []
 
     resp = VoiceResponse()
 
     if not je_otevreno():
         resp.say(
-            "Dobry den, dekujeme za Vas hovor. "
-            "Momentalne jsme zavreni. "
-            "Nase provozni doba je pondeli az nedele od deseti do dvaadvaceti hodin. "
-            "Zavolejte nam prosim znovu. Dekujeme.",
+            "Dobry den, BOOM PIZZA. Momentalne jsme zavreni. "
+            "Otevirame v deset hodin. Zavolejte nam znovu. Dekujeme.",
             voice=HLAS,
             language=JAZYK
         )
@@ -175,13 +192,41 @@ def voice():
         language=JAZYK
     )
     resp.append(gather)
-    resp.redirect("/voice")
+    resp.redirect("/voice-no-input")
+    return str(resp)
+
+@app.route("/voice-no-input", methods=["POST"])
+def voice_no_input():
+    zakaznik = request.form.get("From", "")
+    silence = voice_silence.get(zakaznik, 0) + 1
+    voice_silence[zakaznik] = silence
+
+    if silence >= 2:
+        voice_silence[zakaznik] = 0
+        return prepoj_na_obsluhu(zakaznik, "Zakaznik neodpovedal")
+
+    resp = VoiceResponse()
+    gather = Gather(
+        input="speech",
+        action="/voice-response",
+        language=JAZYK,
+        speech_timeout="1",
+        timeout=4
+    )
+    gather.say(
+        "Jste tam? Co Vam mohu dat?",
+        voice=HLAS,
+        language=JAZYK
+    )
+    resp.append(gather)
+    resp.redirect("/voice-no-input")
     return str(resp)
 
 @app.route("/voice-response", methods=["POST"])
 def voice_response():
     zakaznik = request.form.get("From", "")
     zprava = request.form.get("SpeechResult", "").strip()
+    voice_silence[zakaznik] = 0
 
     if not zprava:
         failures = voice_failures.get(zakaznik, 0) + 1
@@ -189,7 +234,7 @@ def voice_response():
 
         if failures >= 2:
             voice_failures[zakaznik] = 0
-            return prepoj_na_obsluhu(zakaznik)
+            return prepoj_na_obsluhu(zakaznik, "Bot nerozumel zakaznikovi")
 
         resp = VoiceResponse()
         gather = Gather(
@@ -200,7 +245,7 @@ def voice_response():
             timeout=4
         )
         gather.say(
-            "Promiñte, nerozumel jsem. Zkuste to prosim znovu.",
+            "Nerozumel jsem, zkuste znovu.",
             voice=HLAS,
             language=JAZYK
         )
@@ -235,7 +280,7 @@ def voice_response():
         return str(resp)
 
     elif "ZAKAZNIK_CHCE_ZAVOLAT" in odpoved:
-        return prepoj_na_obsluhu(zakaznik)
+        return prepoj_na_obsluhu(zakaznik, "Zakaznik pozadal o ziveho cloveka")
 
     resp = VoiceResponse()
     gather = Gather(
@@ -247,6 +292,7 @@ def voice_response():
     )
     gather.say(odpoved, voice=HLAS, language=JAZYK)
     resp.append(gather)
+    resp.redirect("/voice-no-input")
     return str(resp)
 
 if __name__ == "__main__":
