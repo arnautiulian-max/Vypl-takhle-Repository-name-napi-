@@ -32,8 +32,7 @@ VOICE_SYSTEM = (
     "3. Ptej se vzdy jen na jednu vec najednou.\n"
     "4. Mluv prirozene jako clovek na telefonu.\n"
     "5. VZDY vykej zakaznikovi.\n"
-    "6. Nerikej ceny pokud se zakaznik nezepta - jen potvrd pizzu a zeptej se na dalsi vec.\n"
-    "7. Po potvrzeni objednavky rekni jen: Dekujeme, pizzu mame za X minut."
+    "6. Po potvrzeni objednavky rekni jen cas doruceni a podekuj."
 )
 
 def posli_obsluze(zprava):
@@ -43,16 +42,48 @@ def posli_obsluze(zprava):
         body=zprava
     )
 
-def prepoj_na_obsluhu():
+def prepoj_na_obsluhu(zakaznik=""):
+    if zakaznik:
+        posli_obsluze(
+            "PRICHOZI PREPOJENI\n"
+            "Tel: " + zakaznik + "\n"
+            "Zakaznik ceka na lince - prijmete hovor!"
+        )
     resp = VoiceResponse()
     resp.say(
-        "Prepojuji Vas na naseho kolegu. Okamzik prosim.",
+        "Okamzik prosim, prepojuji Vas na naseho kolegu.",
         voice=HLAS,
         language=JAZYK
     )
-    dial = Dial()
+    dial = Dial(
+        action="/po-prepojeni",
+        timeout=30
+    )
     dial.number(ZIVY_CLOVEK)
     resp.append(dial)
+    return str(resp)
+
+@app.route("/po-prepojeni", methods=["POST"])
+def po_prepojeni():
+    dial_status = request.form.get("DialCallStatus", "")
+    zakaznik = request.form.get("From", "")
+
+    if dial_status != "completed":
+        posli_obsluze(
+            "ZMESKANY HOVOR\n"
+            "Tel: " + zakaznik + "\n"
+            "Zakaznik se nedovolal - zavolej mu zpet!"
+        )
+        resp = VoiceResponse()
+        resp.say(
+            "Omlouvame se, kolega je momentalne nedostupny. "
+            "Zavolame Vam co nejdrive zpet. Dekujeme.",
+            voice=HLAS,
+            language=JAZYK
+        )
+        return str(resp)
+
+    resp = VoiceResponse()
     return str(resp)
 
 @app.route("/webhook", methods=["POST"])
@@ -81,7 +112,7 @@ def webhook():
         odpoved = odpoved.split("OBJEDNAVKA_HOTOVA")[0].strip()
     elif "ZAKAZNIK_CHCE_ZAVOLAT" in odpoved:
         cast = odpoved.split("ZAKAZNIK_CHCE_ZAVOLAT")[-1].strip()
-        posli_obsluze("ZAKAZNIK CHCE ZAVOLAT\nTel: " + cislo + "\n\n" + cast + "\n\nZavolej z cisla 602 123 030")
+        posli_obsluze("ZAKAZNIK CHCE ZAVOLAT\nTel: " + cislo + "\n\nZavolej z cisla 602 123 030")
         odpoved = odpoved.split("ZAKAZNIK_CHCE_ZAVOLAT")[0].strip()
     elif "SPECIALNI_DOTAZ" in odpoved:
         cast = odpoved.split("SPECIALNI_DOTAZ")[-1].strip()
@@ -111,7 +142,7 @@ def voice():
         timeout=4
     )
     gather.say(
-        "Dobry den, BOOM PIZZA, co si Vas mohu dat?",
+        "Dobry den, BOOM PIZZA, co si Vam mohu dat?",
         voice=HLAS,
         language=JAZYK
     )
@@ -130,11 +161,7 @@ def voice_response():
 
         if failures >= 2:
             voice_failures[zakaznik] = 0
-            posli_obsluze(
-                "PREPOJENY HOVOR\nTel: " + zakaznik + "\n"
-                "Bot nerozumel, prepojeno na 602 123 030"
-            )
-            return prepoj_na_obsluhu()
+            return prepoj_na_obsluhu(zakaznik)
 
         resp = VoiceResponse()
         gather = Gather(
@@ -180,12 +207,7 @@ def voice_response():
         return str(resp)
 
     elif "ZAKAZNIK_CHCE_ZAVOLAT" in odpoved:
-        posli_obsluze(
-            "ZAKAZNIK CHCE CLOVEKA\n"
-            "Tel: " + zakaznik + "\n"
-            "Prepojuji na 602 123 030"
-        )
-        return prepoj_na_obsluhu()
+        return prepoj_na_obsluhu(zakaznik)
 
     resp = VoiceResponse()
     gather = Gather(
