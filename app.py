@@ -117,10 +117,12 @@ VOICE_SYSTEM = (
 
 ANONYMNI_CISLA = {"anonymous", "+266696687", "+86282452253", ""}
 
+
 def je_anonymni(cislo):
     return not cislo or cislo.lower() in ANONYMNI_CISLA or "anonymous" in cislo.lower()
 
 
+def je_otevreno():
     now = datetime.now()
     return 10 <= now.hour < 22
 
