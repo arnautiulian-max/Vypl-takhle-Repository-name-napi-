@@ -1,6 +1,20 @@
 import re
 
 # ─────────────────────────────────────────────
+# OPRAVY ULIC — časté STT zkomoleniny adres
+# ─────────────────────────────────────────────
+STT_ULICE = {
+    "nádražní": "Čelakovského",
+    "nadrazni": "Čelakovského",
+    "nádraží": "Čelakovského",
+    "celakovskeho": "Čelakovského",
+    "čelakovského": "Čelakovského",
+    "chelakovskeho": "Čelakovského",
+    "čelakovskýho": "Čelakovského",
+    "čelakovskýho": "Čelakovského",
+}
+
+# ─────────────────────────────────────────────
 # OPRAVY STT — časté zkomoleniny speech-to-text
 # ─────────────────────────────────────────────
 STT_OPRAVY = {
@@ -191,7 +205,11 @@ def normalizuj(text: str) -> str:
 
     t = text.lower()
 
-    # 1. Opravy STT zkomolenin
+    # 1. Opravy ulic
+    for chyba, oprava in STT_ULICE.items():
+        t = t.replace(chyba.lower(), oprava.lower())
+
+    # 2. Opravy STT zkomolenin
     for chyba, oprava in STT_OPRAVY.items():
         t = t.replace(chyba.lower(), oprava.lower())
 
