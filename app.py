@@ -482,33 +482,5 @@ def voice_response():
     return str(resp)
 
 
-@app.route("/voice-status", methods=["POST"])
-def voice_status():
-    """Twilio volá tento endpoint po skončení hovoru."""
-    zakaznik = request.form.get("From", "")
-    status = request.form.get("CallStatus", "")
-    doba = request.form.get("CallDuration", "0")
-
-    # Ignoruj hovory které skončily normálně (objednávka hotova nebo přepojení)
-    if status in ("completed", "busy", "failed", "no-answer"):
-        # Zkontroluj jestli zákazník měl rozdělanou objednávku
-        history = voice_conversations.get(zakaznik, [])
-        mel_objednavku = any(
-            "OBJEDNAVKA_HOTOVA" in msg.get("content", "")
-            for msg in history
-        )
-
-        if not mel_objednavku and int(doba) > 5:
-            # Zákazník zavěsil bez dokončení objednávky
-            posli_obsluze(
-                "📵 ZÁKAZNÍK ZAVĚSIL BEZ OBJEDNÁVKY\n"
-                "Tel: " + zakaznik + "\n"
-                "Doba hovoru: " + doba + " sekund\n"
-                "Zavolej zpět!"
-            )
-
-    return "", 204
-
-
 if __name__ == "__main__":
     app.run(debug=True, port=5000)
