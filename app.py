@@ -1,4 +1,5 @@
 import os
+import re
 from flask import Flask, request
 from twilio.rest import Client
 from twilio.twiml.messaging_response import MessagingResponse
@@ -7,6 +8,25 @@ import anthropic
 from datetime import datetime
 from menu import MENU_TEXT, SYSTEM_PROMPT
 from slang import normalizuj
+
+# ─────────────────────────────────────────────
+# DETEKCE FRUSTRACE
+# ─────────────────────────────────────────────
+FRUSTRACE_SLOVA = [
+    "do prdele", "do háje", "kurva", "blbost", "idioti", "nechci", "zavěsím",
+    "přepoj", "živého", "člověka", "operátora", "obsluhu", "šéfa",
+    "nefunguje", "nerozumíš", "nechápeš", "blbý bot", "hrozný", "k ničemu",
+    "to nestačí", "špatně", "znovu", "ještě jednou", "opět", "pořád",
+    "stále", "už podruhé", "potřetí", "furt", "zase"
+]
+
+def detekuj_frustraci(text: str) -> bool:
+    t = text.lower()
+    return any(slovo in t for slovo in FRUSTRACE_SLOVA)
+
+def doplnit_strakonice(text: str) -> str:
+    """Neupravuje adresu — město se vždy zjistí od zákazníka."""
+    return text
 
 app = Flask(__name__)
 
@@ -71,7 +91,9 @@ VOICE_SYSTEM = (
     "Adresu sbírej po krocích: ulice a číslo → město.\n"
     "Pokud zákazník řekne jen ulici: 'A číslo popisné?'\n"
     "Pokud zákazník řekne jen číslo: 'A název ulice?'\n"
-    "Nakonec: 'Město?'\n\n"
+    "Vždy se zeptej na město: 'A ve kterém městě?'\n"
+    "Rozvážíme do 15 km od Strakonic — například Strakonice, Písek, Vodňany, Blatná, Horažďovice a okolí.\n"
+    "Pokud zákazník řekne město které je zřejmě dál než 15 km (Praha, Brno, Plzeň...), zdvořile informuj: 'Omlouváme se, do Vašeho města bohužel nerozvážíme. Nabízíme osobní vyzvednutí.'\n\n"
 
     "VELIKOST PIZZY:\n"
     "malou / malá / menší / třicet dva = 32cm\n"
@@ -156,6 +178,39 @@ def prepoj_na_obsluhu(zakaznik="", duvod=""):
     return str(resp)
 
 
+@app.route("/voice-status", methods=["POST"])
+def voice_status():
+    """Twilio volá tento endpoint při každé změně stavu hovoru."""
+    zakaznik = request.form.get("From", "")
+    stav = request.form.get("CallStatus", "")
+    doba = request.form.get("CallDuration", "0")
+
+    # Zákazník zavěsil dříve než dokončil objednávku
+    if stav in ("completed", "canceled", "no-answer", "busy", "failed"):
+        # Pokud hovor trval méně než 60 sekund a není hotová objednávka
+        try:
+            sekundy = int(doba)
+        except ValueError:
+            sekundy = 0
+
+        if sekundy < 60 and stav == "completed":
+            posli_obsluze(
+                "⚠️ ZÁKAZNÍK ZAVĚSIL PŘEDČASNĚ\n"
+                "Tel: " + zakaznik + "\n"
+                "Doba hovoru: " + doba + " sekund\n"
+                "Možná nedokončil objednávku — zavolej zpět!"
+            )
+        elif stav in ("no-answer", "busy", "failed"):
+            posli_obsluze(
+                "📵 ZMEŠKANÝ HOVOR\n"
+                "Tel: " + zakaznik + "\n"
+                "Stav: " + stav + "\n"
+                "Zavolej zpět!"
+            )
+
+    return "", 204
+
+
 @app.route("/po-prepojeni", methods=["POST"])
 def po_prepojeni():
     dial_status = request.form.get("DialCallStatus", "")
@@ -180,6 +235,16 @@ def po_prepojeni():
 def webhook():
     zakaznik = request.form.get("From")
     zprava = normalizuj(request.form.get("Body", "").strip())
+
+    # Detekce frustrace — pošli notifikaci obsluze
+    if detekuj_frustraci(zprava):
+        cislo_raw = zakaznik.replace("whatsapp:", "")
+        posli_obsluze(
+            "⚠️ NESPOKOJENÝ ZÁKAZNÍK — WhatsApp\n"
+            "Tel: " + cislo_raw + "\n"
+            "Zpráva: " + zprava + "\n"
+            "Zkontroluj konverzaci!"
+        )
 
     if not je_otevreno():
         resp = MessagingResponse()
@@ -328,7 +393,18 @@ def voice_no_input():
 def voice_response():
     zakaznik = request.form.get("From", "")
     zprava = normalizuj(request.form.get("SpeechResult", "").strip())
+    zprava = doplnit_strakonice(zprava)
     voice_silence[zakaznik] = 0
+
+    # Detekce frustrace — přepoj okamžitě a pošli notifikaci
+    if detekuj_frustraci(zprava):
+        posli_obsluze(
+            "⚠️ NESPOKOJENÝ ZÁKAZNÍK — Telefon\n"
+            "Tel: " + zakaznik + "\n"
+            "Řekl: " + zprava + "\n"
+            "Přepojuji na tebe!"
+        )
+        return prepoj_na_obsluhu(zakaznik, "Zákazník frustrovaný — automatické přepojení")
 
     if not zprava:
         failures = voice_failures.get(zakaznik, 0) + 1
