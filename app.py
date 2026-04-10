@@ -6,6 +6,7 @@ from twilio.twiml.voice_response import VoiceResponse, Gather, Dial
 import anthropic
 from datetime import datetime
 from menu import MENU_TEXT, SYSTEM_PROMPT
+from slang import normalizuj
 
 app = Flask(__name__)
 
@@ -178,7 +179,7 @@ def po_prepojeni():
 @app.route("/webhook", methods=["POST"])
 def webhook():
     zakaznik = request.form.get("From")
-    zprava = request.form.get("Body", "").strip()
+    zprava = normalizuj(request.form.get("Body", "").strip())
 
     if not je_otevreno():
         resp = MessagingResponse()
@@ -326,7 +327,7 @@ def voice_no_input():
 @app.route("/voice-response", methods=["POST"])
 def voice_response():
     zakaznik = request.form.get("From", "")
-    zprava = request.form.get("SpeechResult", "").strip()
+    zprava = normalizuj(request.form.get("SpeechResult", "").strip())
     voice_silence[zakaznik] = 0
 
     if not zprava:
