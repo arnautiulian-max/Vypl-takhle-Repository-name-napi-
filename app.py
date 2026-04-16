@@ -10,39 +10,17 @@ from menu import MENU_TEXT, SYSTEM_PROMPT
 from slang import normalizuj
 
 # ─────────────────────────────────────────────
-# DETEKCE FRUSTRACE
+# KONFIGURACE A KLIENTI
 # ─────────────────────────────────────────────
-FRUSTRACE_SLOVA = [
-    "do prdele", "do háje", "kurva", "blbost", "idioti", "nechci", "zavěsím",
-    "přepoj", "živého", "člověka", "operátora", "obsluhu", "šéfa",
-    "nefunguje", "nerozumíš", "nechápeš", "blbý bot", "hrozný", "k ničemu",
-    "to nestačí", "špatně", "znovu", "ještě jednou", "opět", "pořád",
-    "stále", "už podruhé", "potřetí", "furt", "zase"
-]
-
-def detekuj_frustraci(text: str) -> bool:
-    t = text.lower()
-    return any(slovo in t for slovo in FRUSTRACE_SLOVA)
-
-def doplnit_strakonice(text: str) -> str:
-    """Neupravuje adresu — město se vždy zjistí od zákazníka."""
-    return text
-
 app = Flask(__name__)
 
 twilio_client = Client(
     os.environ["TWILIO_ACCOUNT_SID"],
     os.environ["TWILIO_AUTH_TOKEN"]
 )
+# Přechod na inteligentnější model Sonnet pro lepší češtinu
 claude = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
-
-conversations = {}
-voice_conversations = {}
-voice_failures = {}
-voice_silence = {}
-
-# Paměť posledních objednávek per telefonní číslo
-posledni_objednavka = {}
+CLAUDE_MODEL = "claude-3-5-sonnet-20240620"
 
 OBSLUHA_WHATSAPP = os.environ["OBSLUHA_WHATSAPP"]
 TWILIO_NUMBER = os.environ["TWILIO_NUMBER"]
@@ -50,318 +28,135 @@ ZIVY_CLOVEK = "+420602123030"
 HLAS = "Google.cs-CZ-Wavenet-A"
 JAZYK = "cs-CZ"
 
+# Paměť
+conversations = {}
+voice_conversations = {}
+voice_failures = {}
+voice_silence = {}
+posledni_objednavka = {}
+
+# ─────────────────────────────────────────────
+# VOCO_SYSTEM - VYLEPŠENÝ PRO HLAS
+# ─────────────────────────────────────────────
 VOICE_SYSTEM = (
     SYSTEM_PROMPT +
-    "\n\nJsi hlasový asistent pizzerie BOOM PIZZA. Chovej se jako profesionální telefonní operátor.\n\n"
-
-    "ZLATÁ PRAVIDLA:\n"
-    "1. MAX 1 věta na odpověď. Nikdy víc.\n"
-    "2. NIKDY neopakuj GDPR ani žádnou úvodní větu — bylo řečeno jednou, dost.\n"
-    "3. NIKDY neshrnuj co zákazník řekl pokud to není nutné pro potvrzení.\n"
-    "4. Ptej se vždy jen na JEDNU věc.\n"
-    "5. VŽDY vykej.\n"
-    "6. Žádné 'Výborně!', 'Skvělé!', 'Samozřejmě!' — rovnou na věc.\n\n"
-
-    "TEMPO HOVORU:\n"
-    "Správný tok: zákazník mluví → ty potvrdíš jednou větou → ptáš se na další věc.\n"
-    "Špatně: 'Dobře, takže jste si vybrali Boom Pizza, to je výborná volba, přejete si...'\n"
-    "Správně: 'Jakou velikost — malou nebo velkou?'\n\n"
-
-    "OBJEDNÁVKA — POŘADÍ OTÁZEK:\n"
-    "1. Co si dáte? (pizza + velikost)\n"
-    "2. Přidám okraj? (mozzarellový 59 Kč nebo čedarový 69 Kč)\n"
-    "3. Ještě něco?\n"
-    "4. Vyzvednutí nebo rozvoz?\n"
-    "5. Pokud rozvoz: adresa?\n"
-    "6. Jméno?\n"
-    "7. Na kdy? (co nejdříve nebo konkrétní čas)\n"
-    "8. Shrnutí + potvrzení (POUZE jednou, těsně před odesláním)\n\n"
-
-    "SHRNUTÍ — POUZE JEDNOU:\n"
-    "Shrnutí řekni POUZE těsně před finálním potvrzením zákazníka.\n"
-    "Formát: '[položky], rozvoz na [adresa], jméno [jméno], celkem [cena] korun — potvrzujete?'\n"
-    "Po potvrzení okamžitě odešli OBJEDNAVKA_HOTOVA. Nic dalšího neříkej.\n\n"
-
-    "ČÍSLA A ADRESY:\n"
-    "Telefonní číslo zákazníka dostaneme automaticky — NIKDY se ho neptej, pokud ho máme.\n"
-    "Pokud systém číslo nezná (anonymní hovor nebo FaceTime), zeptej se jednoduše: Vaše číslo prosím?\n"
-    "Adresu zopakuj jednou pro potvrzení, pak pokračuj.\n\n"
-
-    "ROZPOZNÁVÁNÍ ADRESY:\n"
-    "Adresu sbírej po krocích: ulice a číslo → město.\n"
-    "Pokud zákazník řekne jen ulici: 'A číslo popisné?'\n"
-    "Pokud zákazník řekne jen číslo: 'A název ulice?'\n"
-    "Vždy se zeptej na město: 'A ve kterém městě?'\n"
-    "Rozvážíme do 15 km od Strakonic — například Strakonice, Písek, Vodňany, Blatná, Horažďovice a okolí.\n"
-    "Pokud zákazník řekne město které je zřejmě dál než 15 km (Praha, Brno, Plzeň...), zdvořile informuj: 'Omlouváme se, do Vašeho města bohužel nerozvážíme. Nabízíme osobní vyzvednutí.'\n\n"
-
-    "VELIKOST PIZZY:\n"
-    "malou / malá / menší / třicet dva = 32cm\n"
-    "velkou / velká / větší / čtyřicet dva = 42cm\n"
-    "Pokud zákazník neřekne velikost: 'Malou nebo velkou?'\n\n"
-
-    "ROZPOZNÁVÁNÍ PIZZ PO TELEFONU:\n"
-    "Buď tolerantní ke zkomolenинам od STT.\n"
-    "šunková / sunkova = Šunkás\n"
-    "salámová / pepperoni / peperoni = Pepperonis\n"
-    "sýrová / čtyři sýry / cheesy = Super Cheesys\n"
-    "slaninová / slanina = Slaninos\n"
-    "margarita / margherita / klasická = Margheritas\n"
-    "tuňáková / tuňák = Tunas\n"
-    "havajská / hawaii / ananas = Hawais\n"
-    "chorizo = Chorizos\n"
-    "jalapeño / jalap / ostrá = Pepperoni Jalapeño\n"
-    "texaská / texas = Texas\n"
-    "kuřecí / kuře = Chicken\n"
-    "brusinkova / borůvková = Brusinkys/Borůvkys\n"
-    "farmářská / sedlácká = Farmaris\n"
-    "bbq / barbecue = Barbecues Chicken\n"
-    "mexická / mexiko = Mexicanos\n"
-    "caprese / kaprese = Caprisos\n"
-    "boom hot / hot / pikantní = Boom Pizza Hot\n"
-    "boom / specialita = Boom Pizza\n"
-    "vegetářská / bez masa = Vegetarians\n"
-    "pivo / pilsner = Pilsner Urquell\n"
-    "Pokud si nejsi jistý: 'Myslíte [název]?'\n\n"
-
-    "PAMĚŤ OBJEDNÁVKY BĚHEM HOVORU:\n"
-    "Udržuj interní seznam všeho co zákazník objednal.\n"
-    "Nikdy nezapomínej předchozí položky.\n"
-    "Pokud zákazník řekne 'a ještě' nebo 'přidejte' — přidej a potvrď jednou větou.\n\n"
-
-    "VRACEJÍCÍ SE ZÁKAZNÍK:\n"
-    "Pokud má zákazník uloženou předchozí objednávku: 'Vítejte zpět, dáte si znovu to samé?'\n"
-    "Pokud ano — přejdi rovnou na způsob převzetí.\n\n"
-
-    "ČAS DORUČENÍ:\n"
-    "Vyzvednutí: cca dvacet minut. Rozvoz: cca třicet minut. Vždy orientačně.\n"
+    "\n\nJsi HLASOVÝ asistent BOOM PIZZA. Mluv přirozeně, stručně a lidsky.\n"
+    "1. Pokud zákazník řekne pizzu, HNED se zeptej na VELIKOST (32cm nebo 42cm).\n"
+    "2. Nabídni mozzarellový nebo čedarový OKRAJ.\n"
+    "3. Adresu a jméno zapiš přesně. Pokud nerozumíš, slušně se zeptej znovu.\n"
+    "4. Na konci VŽDY shrň objednávku a cenu pro finální potvrzení.\n"
+    "5. Jakmile zákazník potvrdí 'Ano' nebo 'Souhlasí', ukonči to značkou OBJEDNAVKA_HOTOVA.\n"
 )
 
+FRUSTRACE_SLOVA = ["do prdele", "kurva", "blbost", "idioti", "zavěsím", "přepoj", "operátora", "nerozumíš"]
 
-ANONYMNI_CISLA = {"anonymous", "+266696687", "+86282452253", ""}
-
+# ─────────────────────────────────────────────
+# POMOCNÉ FUNKCE
+# ─────────────────────────────────────────────
+def detekuj_frustraci(text: str) -> bool:
+    t = text.lower()
+    return any(slovo in t for slovo in FRUSTRACE_SLOVA)
 
 def je_anonymni(cislo):
-    return not cislo or cislo.lower() in ANONYMNI_CISLA or "anonymous" in cislo.lower()
-
+    anonymni = {"anonymous", "+266696687", "+86282452253", ""}
+    return not cislo or cislo.lower() in anonymni or "anonymous" in cislo.lower()
 
 def je_otevreno():
     now = datetime.now()
     return 10 <= now.hour < 22
 
-
 def posli_obsluze(zprava):
-    twilio_client.messages.create(
-        from_=TWILIO_NUMBER,
-        to=OBSLUHA_WHATSAPP,
-        body=zprava
-    )
-
+    twilio_client.messages.create(from_=TWILIO_NUMBER, to=OBSLUHA_WHATSAPP, body=zprava)
 
 def prepoj_na_obsluhu(zakaznik="", duvod=""):
     if zakaznik:
-        posli_obsluze(
-            "PŘÍCHOZÍ PŘEPOJENÍ\n"
-            "Tel: " + zakaznik + "\n"
-            "Důvod: " + (duvod or "Zákazník požádal o spojení") + "\n"
-            "Zákazník čeká na lince!"
-        )
+        posli_obsluze(f"⚠️ PŘEPOJENÍ: {zakaznik}\nDůvod: {duvod}")
     resp = VoiceResponse()
-    resp.say(
-        "Přepojuji Vás na kolegu.",
-        voice=HLAS,
-        language=JAZYK
-    )
+    resp.say("Moment, přepojuji Vás na kolegu.", voice=HLAS, language=JAZYK)
     dial = Dial(action="/po-prepojeni", timeout=30)
     dial.number(ZIVY_CLOVEK)
     resp.append(dial)
     return str(resp)
 
-
-@app.route("/voice-status", methods=["POST"])
-def voice_status():
-    """Twilio volá tento endpoint při každé změně stavu hovoru."""
-    zakaznik = request.form.get("From", "")
-    stav = request.form.get("CallStatus", "")
-    doba = request.form.get("CallDuration", "0")
-
-    # Zákazník zavěsil dříve než dokončil objednávku
-    if stav in ("completed", "canceled", "no-answer", "busy", "failed"):
-        # Pokud hovor trval méně než 60 sekund a není hotová objednávka
-        try:
-            sekundy = int(doba)
-        except ValueError:
-            sekundy = 0
-
-        if sekundy < 60 and stav == "completed":
-            posli_obsluze(
-                "⚠️ ZÁKAZNÍK ZAVĚSIL PŘEDČASNĚ\n"
-                "Tel: " + zakaznik + "\n"
-                "Doba hovoru: " + doba + " sekund\n"
-                "Možná nedokončil objednávku — zavolej zpět!"
-            )
-        elif stav in ("no-answer", "busy", "failed"):
-            posli_obsluze(
-                "📵 ZMEŠKANÝ HOVOR\n"
-                "Tel: " + zakaznik + "\n"
-                "Stav: " + stav + "\n"
-                "Zavolej zpět!"
-            )
-
-    return "", 204
-
-
-@app.route("/po-prepojeni", methods=["POST"])
-def po_prepojeni():
-    dial_status = request.form.get("DialCallStatus", "")
-    zakaznik = request.form.get("From", "")
-    if dial_status != "completed":
-        posli_obsluze(
-            "ZMEŠKANÝ HOVOR\n"
-            "Tel: " + zakaznik + "\n"
-            "Zákazník se nedovolal — zavolej zpět!"
-        )
-        resp = VoiceResponse()
-        resp.say(
-            "Kolega je nedostupný. Zavoláme Vám zpět co nejdříve. Děkujeme.",
-            voice=HLAS,
-            language=JAZYK
-        )
-        return str(resp)
-    return str(VoiceResponse())
-
-
-@app.route("/webhook", methods=["POST"])
-def webhook():
-    zakaznik = request.form.get("From")
-    zprava = normalizuj(request.form.get("Body", "").strip())
-
-    # Detekce frustrace — pošli notifikaci obsluze
-    if detekuj_frustraci(zprava):
-        cislo_raw = zakaznik.replace("whatsapp:", "")
-        posli_obsluze(
-            "⚠️ NESPOKOJENÝ ZÁKAZNÍK — WhatsApp\n"
-            "Tel: " + cislo_raw + "\n"
-            "Zpráva: " + zprava + "\n"
-            "Zkontroluj konverzaci!"
-        )
-
-    if not je_otevreno():
-        resp = MessagingResponse()
-        resp.message(
-            "Dobrý den! Děkujeme za Vaši zprávu. "
-            "Momentálně jsme zavřeni. "
-            "Provozní doba: Po–Ne 10:00–22:00. "
-            "Rádi Vám pomůžeme s objednávkou od 10:00!"
-        )
-        return str(resp)
-
-    history = conversations.get(zakaznik, [])
-    history.append({"role": "user", "content": zprava})
-
-    response = claude.messages.create(
-        model="claude-haiku-4-5-20251001",
-        max_tokens=500,
-        system=SYSTEM_PROMPT,
-        messages=history
-    )
-    odpoved = response.content[0].text
-    history.append({"role": "assistant", "content": odpoved})
-    conversations[zakaznik] = history[-20:]
-
-    cislo = zakaznik.replace("whatsapp:", "")
-
-    if "OBJEDNAVKA_HOTOVA" in odpoved:
-        cast = odpoved.split("OBJEDNAVKA_HOTOVA")[-1].strip()
-        cast = cast.replace("AUTOMATICKY_Z_SYSTEMU", cislo)
-        posli_obsluze("NOVÁ OBJEDNÁVKA — BOOM PIZZA\nTel: " + cislo + "\n\n" + cast)
-        posledni_objednavka[cislo] = cast
-        odpoved = odpoved.split("OBJEDNAVKA_HOTOVA")[0].strip()
-    elif "ZAKAZNIK_CHCE_ZAVOLAT" in odpoved:
-        posli_obsluze("ZÁKAZNÍK CHCE ZAVOLAT\nTel: " + cislo + "\n\nZavolej z čísla 602 123 030")
-        odpoved = odpoved.split("ZAKAZNIK_CHCE_ZAVOLAT")[0].strip()
-    elif "SPECIALNI_DOTAZ" in odpoved:
-        cast = odpoved.split("SPECIALNI_DOTAZ")[-1].strip()
-        posli_obsluze("SPECIÁLNÍ DOTAZ\nTel: " + cislo + "\n\n" + cast + "\n\nZavolej z čísla 602 123 030")
-        odpoved = odpoved.split("SPECIALNI_DOTAZ")[0].strip()
-    elif "PODEZRELA_ZPRAVA" in odpoved:
-        cast = odpoved.split("PODEZRELA_ZPRAVA")[-1].strip()
-        posli_obsluze("PODEZŘELÁ ZPRÁVA\nTel: " + cislo + "\n\n" + cast)
-        odpoved = odpoved.split("PODEZRELA_ZPRAVA")[0].strip()
-
-    resp = MessagingResponse()
-    resp.message(odpoved)
-    return str(resp)
-
-
+# ─────────────────────────────────────────────
+# HLASOVÉ ENDPOINTY (TWILIO)
+# ─────────────────────────────────────────────
 @app.route("/voice", methods=["POST"])
 def voice():
     zakaznik = request.form.get("From", "")
     voice_failures[zakaznik] = 0
     voice_silence[zakaznik] = 0
-
-    # Načti historii — pokud zákazník volá znovu, vložíme kontext poslední objednávky
     voice_conversations[zakaznik] = []
-    posledni = posledni_objednavka.get(zakaznik, "") if not je_anonymni(zakaznik) else ""
 
-    # Předej botovi info o číslu
-    if je_anonymni(zakaznik):
-        voice_conversations[zakaznik] = [
-            {"role": "user", "content": "Telefonní číslo zákazníka není k dispozici (anonymní hovor nebo FaceTime). Až budeš sbírat kontaktní údaje, zeptej se na číslo."},
-            {"role": "assistant", "content": "Rozumím, zeptám se zákazníka na číslo při sbírání kontaktů."}
-        ]
-    elif posledni:
-        uvodni_kontext = (
-            "Zákazník volá znovu. Jeho poslední objednávka byla:\n" + posledni +
-            "\nPozdrav ho jako vracejícího se zákazníka a zeptej se jestli chce to samé."
-        )
-        voice_conversations[zakaznik] = [
-            {"role": "user", "content": uvodni_kontext},
-            {"role": "assistant", "content": "Rozumím, zákazníka pozdravím jako vracejícího se hosta."}
-        ]
-
-    # DŮLEŽITÉ: V Twilio konzoli nastav Status Callback URL na:
-    # https://vypl-takhle-repository-name-napi-production.up.railway.app/voice-status
     resp = VoiceResponse()
-
     if not je_otevreno():
-        resp.say(
-            "Dobrý den, BOOM PIZZA. Momentálně jsme zavřeni. "
-            "Otevíráme v deset hodin. Zavolejte nám znovu. Děkujeme.",
-            voice=HLAS,
-            language=JAZYK
-        )
+        resp.say("Dobrý den, BOOM PIZZA. Máme zavřeno, otevíráme v 10 hodin.", voice=HLAS, language=JAZYK)
         return str(resp)
 
+    # Gather nastaven na 'auto' pro přirozený konec řeči
     gather = Gather(
         input="speech",
         action="/voice-response",
         language=JAZYK,
-        speech_timeout="2",
+        speech_timeout="auto",
+        enhanced=True,
         timeout=5
     )
 
+    posledni = posledni_objednavka.get(zakaznik, "")
     if posledni:
-        gather.say(
-            "Dobrý den, BOOM PIZZA. "
-            "Vítejte zpět! Chcete objednat znovu to samé jako minule?",
-            voice=HLAS,
-            language=JAZYK
-        )
+        gather.say("Vítejte zpět v BOOM PIZZA! Chcete to samé co minule?", voice=HLAS, language=JAZYK)
     else:
-        gather.say(
-            "Dobrý den, BOOM PIZZA. "
-            "Tento hovor může být zaznamenán pro účely zpracování objednávky. "
-            "Pokračováním v hovoru souhlasíte se zpracováním osobních údajů. "
-            "Co Vám mohu dát?",
-            voice=HLAS,
-            language=JAZYK
-        )
+        gather.say("Dobrý den, BOOM PIZZA. Co si dnes dáte?", voice=HLAS, language=JAZYK)
 
     resp.append(gather)
     resp.redirect("/voice-no-input")
     return str(resp)
 
+@app.route("/voice-response", methods=["POST"])
+def voice_response():
+    zakaznik = request.form.get("From", "")
+    vstup = request.form.get("SpeechResult", "").strip()
+    zprava = normalizuj(vstup)
+    
+    if not zprava or len(zprava) < 2:
+        return voice_no_input()
+
+    if detekuj_frustraci(zprava):
+        return prepoj_na_obsluhu(zakaznik, "Frustrace v hovoru")
+
+    history = voice_conversations.get(zakaznik, [])
+    history.append({"role": "user", "content": zprava})
+
+    response = claude.messages.create(
+        model=CLAUDE_MODEL,
+        max_tokens=400,
+        system=VOICE_SYSTEM,
+        messages=history
+    )
+    odpoved = response.content[0].text
+    history.append({"role": "assistant", "content": odpoved})
+    voice_conversations[zakaznik] = history[-20:]
+
+    resp = VoiceResponse()
+    
+    if "OBJEDNAVKA_HOTOVA" in odpoved:
+        data = odpoved.split("OBJEDNAVKA_HOTOVA")[-1].strip()
+        potvrzeni = odpoved.split("OBJEDNAVKA_HOTOVA")[0].strip()
+        posli_obsluze(f"✅ NOVÁ OBJEDNÁVKA\nTel: {zakaznik}\n{data}")
+        posledni_objednavka[zakaznik] = data
+        resp.say(potvrzeni, voice=HLAS, language=JAZYK)
+        resp.hangup()
+        return str(resp)
+
+    if "ZAKAZNIK_CHCE_ZAVOLAT" in odpoved:
+        return prepoj_na_obsluhu(zakaznik, "Zákazník chce operátora")
+
+    gather = Gather(input="speech", action="/voice-response", language=JAZYK, speech_timeout="auto", enhanced=True)
+    gather.say(odpoved, voice=HLAS, language=JAZYK)
+    resp.append(gather)
+    resp.redirect("/voice-no-input")
+    return str(resp)
 
 @app.route("/voice-no-input", methods=["POST"])
 def voice_no_input():
@@ -370,117 +165,47 @@ def voice_no_input():
     voice_silence[zakaznik] = silence
 
     if silence >= 2:
-        voice_silence[zakaznik] = 0
-        return prepoj_na_obsluhu(zakaznik, "Zákazník neodpověděl")
+        return prepoj_na_obsluhu(zakaznik, "Ticho na lince")
 
     resp = VoiceResponse()
-    gather = Gather(
-        input="speech",
-        action="/voice-response",
-        language=JAZYK,
-        speech_timeout="2",
-        timeout=5
-    )
-    gather.say(
-        "Jste tam? Jak Vám mohu pomoci?",
-        voice=HLAS,
-        language=JAZYK
-    )
+    gather = Gather(input="speech", action="/voice-response", language=JAZYK, speech_timeout="auto")
+    gather.say("Jste tam? Jakou pizzu si dáte?", voice=HLAS, language=JAZYK)
     resp.append(gather)
-    resp.redirect("/voice-no-input")
     return str(resp)
 
-
-@app.route("/voice-response", methods=["POST"])
-def voice_response():
+# ─────────────────────────────────────────────
+# OSTATNÍ (WHATSAPP, STATUS, ATD.)
+# ─────────────────────────────────────────────
+@app.route("/voice-status", methods=["POST"])
+def voice_status():
     zakaznik = request.form.get("From", "")
-    zprava = normalizuj(request.form.get("SpeechResult", "").strip())
-    zprava = doplnit_strakonice(zprava)
-    voice_silence[zakaznik] = 0
+    stav = request.form.get("CallStatus", "")
+    doba = request.form.get("CallDuration", "0")
+    if stav == "completed" and int(doba) < 15:
+        posli_obsluze(f"⚠️ KRÁTKÝ HOVOR ({doba}s): {zakaznik} - možná selhání AI.")
+    return "", 204
 
-    # Detekce frustrace — přepoj okamžitě a pošli notifikaci
-    if detekuj_frustraci(zprava):
-        posli_obsluze(
-            "⚠️ NESPOKOJENÝ ZÁKAZNÍK — Telefon\n"
-            "Tel: " + zakaznik + "\n"
-            "Řekl: " + zprava + "\n"
-            "Přepojuji na tebe!"
-        )
-        return prepoj_na_obsluhu(zakaznik, "Zákazník frustrovaný — automatické přepojení")
-
-    if not zprava:
-        failures = voice_failures.get(zakaznik, 0) + 1
-        voice_failures[zakaznik] = failures
-
-        if failures >= 2:
-            voice_failures[zakaznik] = 0
-            return prepoj_na_obsluhu(zakaznik, "Bot nerozuměl zákazníkovi")
-
-        resp = VoiceResponse()
-        gather = Gather(
-            input="speech",
-            action="/voice-response",
-            language=JAZYK,
-            speech_timeout="2",
-            timeout=5
-        )
-        gather.say(
-            "Nerozuměl jsem, zkuste znovu prosím.",
-            voice=HLAS,
-            language=JAZYK
-        )
-        resp.append(gather)
-        resp.redirect("/voice-response")
-        return str(resp)
-
-    voice_failures[zakaznik] = 0
-
-    history = voice_conversations.get(zakaznik, [])
+@app.route("/webhook", methods=["POST"])
+def webhook():
+    zakaznik = request.form.get("From")
+    zprava = normalizuj(request.form.get("Body", "").strip())
+    history = conversations.get(zakaznik, [])
     history.append({"role": "user", "content": zprava})
-
-    response = claude.messages.create(
-        model="claude-haiku-4-5-20251001",
-        max_tokens=400,
-        system=VOICE_SYSTEM,
-        messages=history
-    )
+    response = claude.messages.create(model=CLAUDE_MODEL, max_tokens=500, system=SYSTEM_PROMPT, messages=history)
     odpoved = response.content[0].text
     history.append({"role": "assistant", "content": odpoved})
-    voice_conversations[zakaznik] = history[-30:]
-
+    conversations[zakaznik] = history[-20:]
+    
     if "OBJEDNAVKA_HOTOVA" in odpoved:
-        cast = odpoved.split("OBJEDNAVKA_HOTOVA")[-1].strip()
-        if je_anonymni(zakaznik):
-            # Číslo řekl zákazník sám — bot ho zapsal do objednávky
-            pass
-        else:
-            cast = cast.replace("AUTOMATICKY_Z_SYSTEMU", zakaznik)
-        posli_obsluze(
-            "NOVÁ OBJEDNÁVKA TELEFON — BOOM PIZZA\n"
-            "Tel: " + (zakaznik if not je_anonymni(zakaznik) else "viz objednávka") + "\n\n" + cast
-        )
-        posledni_objednavka[zakaznik] = cast
-        odpoved_text = odpoved.split("OBJEDNAVKA_HOTOVA")[0].strip()
-        resp = VoiceResponse()
-        resp.say(odpoved_text, voice=HLAS, language=JAZYK)
-        return str(resp)
-
-    elif "ZAKAZNIK_CHCE_ZAVOLAT" in odpoved:
-        return prepoj_na_obsluhu(zakaznik, "Zákazník požádal o živého člověka")
-
-    resp = VoiceResponse()
-    gather = Gather(
-        input="speech",
-        action="/voice-response",
-        language=JAZYK,
-        speech_timeout="2",
-        timeout=5
-    )
-    gather.say(odpoved, voice=HLAS, language=JAZYK)
-    resp.append(gather)
-    resp.redirect("/voice-no-input")
+        posli_obsluze(f"WA OBJEDNÁVKA: {zakaznik}\n{odpoved}")
+    
+    resp = MessagingResponse()
+    resp.message(odpoved.split("OBJEDNAVKA_HOTOVA")[0].strip())
     return str(resp)
 
+@app.route("/po-prepojeni", methods=["POST"])
+def po_prepojeni():
+    return str(VoiceResponse())
 
 if __name__ == "__main__":
-    app.run(debug=True, port=5000)
+    app.run(debug=True, port=int(os.environ.get("PORT", 5000)))
