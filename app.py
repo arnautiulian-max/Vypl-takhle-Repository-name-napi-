@@ -81,13 +81,17 @@ PIZZA_HINTS = (
 
 
 def novy_gather(action_url="/voice-response"):
-    """Vytvoří Gather s optimalizovaným STT pro češtinu."""
+    """Vytvoří Gather s optimalizovaným STT pro češtinu.
+
+    KLÍČOVÉ: speech_timeout="3" (ne "auto") — auto odstřihne zákazníka
+    po prvním slově s pauzou. Čeština má delší pauzy než angličtina.
+    """
     return Gather(
         input="speech",
         action=action_url,
         language=JAZYK,
-        speech_timeout="auto",          # chytřejší detekce konce věty než fixní 2s
-        timeout=5,
+        speech_timeout="3",             # 3 vteřiny ticha = konec věty
+        timeout=7,                      # 7 vteřin celkem na začátek řeči
         enhanced=True,                  # lepší STT model
         speech_model="phone_call",      # optimalizováno pro telefon
         hints=PIZZA_HINTS,              # seznam očekávaných slov
@@ -162,7 +166,6 @@ def voice_status():
     stav = request.form.get("CallStatus", "")
     doba = request.form.get("CallDuration", "0")
 
-    # Zákazník zavěsil dříve než dokončil objednávku
     if stav in ("completed", "canceled", "no-answer", "busy", "failed"):
         try:
             sekundy = int(doba)
@@ -213,7 +216,6 @@ def webhook():
     zprava = normalizuj(request.form.get("Body", "").strip())
     cislo = normalizuj_cislo(zakaznik)
 
-    # Detekce frustrace — pošli notifikaci obsluze
     if detekuj_frustraci(zprava):
         posli_obsluze(
             "⚠️ NESPOKOJENÝ ZÁKAZNÍK — WhatsApp\n"
@@ -279,6 +281,11 @@ VOICE_SYSTEM = (
     "4. Ptej se vždy jen na JEDNU věc.\n"
     "5. VŽDY vykej.\n"
     "6. Žádné 'Výborně!', 'Skvělé!', 'Samozřejmě!' — rovnou na věc.\n\n"
+
+    "NEÚPLNÁ ŘEČ:\n"
+    "Pokud zákazník řekne jen pozdrav typu 'dobrý', 'dobrý den', 'ano', 'haló',\n"
+    "nebo jednoslovnou odpověď bez kontextu, zeptej se krátce: 'Co si dáte?'\n"
+    "Nikdy neopakuj uvítání BOOM PIZZA — zákazník ho už slyšel.\n\n"
 
     "TEMPO HOVORU:\n"
     "Správný tok: zákazník mluví → ty potvrdíš jednou větou → ptáš se na další věc.\n"
@@ -364,10 +371,8 @@ def voice():
     voice_failures[cislo] = 0
     voice_silence[cislo] = 0
 
-    # Načti historii — pokud zákazník volá znovu, vložíme kontext poslední objednávky
     posledni = posledni_objednavka.get(cislo, "") if not je_anonymni(zakaznik) else ""
 
-    # Předej botovi info o číslu
     if je_anonymni(zakaznik):
         voice_conversations[cislo] = [
             {"role": "user", "content": "Telefonní číslo zákazníka není k dispozici (anonymní hovor nebo FaceTime). Až budeš sbírat kontaktní údaje, zeptej se na číslo."},
@@ -408,9 +413,7 @@ def voice():
     else:
         gather.say(
             "Dobrý den, BOOM PIZZA. "
-            "Tento hovor může být zaznamenán pro účely zpracování objednávky. "
-            "Pokračováním v hovoru souhlasíte se zpracováním osobních údajů. "
-            "Co Vám mohu dát?",
+            "Co si dáte?",
             voice=HLAS,
             language=JAZYK
         )
@@ -452,7 +455,6 @@ def voice_response():
     zprava = normalizuj(request.form.get("SpeechResult", "").strip())
     voice_silence[cislo] = 0
 
-    # Detekce frustrace — přepoj okamžitě a pošli notifikaci
     if detekuj_frustraci(zprava):
         posli_obsluze(
             "⚠️ NESPOKOJENÝ ZÁKAZNÍK — Telefon\n"
@@ -499,7 +501,6 @@ def voice_response():
     if "OBJEDNAVKA_HOTOVA" in odpoved:
         cast = odpoved.split("OBJEDNAVKA_HOTOVA")[-1].strip()
         if je_anonymni(zakaznik):
-            # Číslo řekl zákazník sám — bot ho zapsal do objednávky
             pass
         else:
             cast = cast.replace("AUTOMATICKY_Z_SYSTEMU", cislo)
